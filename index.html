@@ -1,0 +1,58 @@
+const SYNC_FILE_NAME = 'weijiu_dijia_sync_db.json';
+
+function getOrCreateFolder_(name, parentFolderId) {
+  const parent = parentFolderId
+    ? DriveApp.getFolderById(parentFolderId)
+    : DriveApp.getRootFolder();
+  const iter = parent.getFoldersByName(name);
+  return iter.hasNext() ? iter.next() : parent.createFolder(name);
+}
+
+function getOrCreateSyncFile_(parentFolderId) {
+  const parent = parentFolderId
+    ? DriveApp.getFolderById(parentFolderId)
+    : DriveApp.getRootFolder();
+  const iter = parent.getFilesByName(SYNC_FILE_NAME);
+  if (iter.hasNext()) return iter.next();
+  return parent.createFile(SYNC_FILE_NAME, JSON.stringify({ state: null }), MimeType.PLAIN_TEXT);
+}
+
+function doGet(e) {
+  try {
+    const pid = (e && e.parameter && e.parameter.parentFolderId) || '';
+    const file = getOrCreateSyncFile_(pid);
+    const parsed = JSON.parse(file.getBlob().getDataAsString('UTF-8') || '{}');
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'ok', state: parsed.state || null }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (body.action === 'uploadPhoto') {
+      const catFolder = getOrCreateFolder_(body.categoryFolder || '外掃檢查', body.parentFolderId || '');
+      const dateFolder = getOrCreateFolder_(body.dateFolder || '', catFolder.getId());
+      const bytes = Utilities.base64Decode(body.base64Data || '');
+      const blob = Utilities.newBlob(bytes, body.mimeType || 'image/jpeg', body.fileName || 'photo.jpg');
+      const file = dateFolder.createFile(blob);
+      return ContentService
+        .createTextOutput(JSON.stringify({ status: 'ok', fileId: file.getId(), fileName: file.getName() }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    const syncFile = getOrCreateSyncFile_(body.parentFolderId || '');
+    syncFile.setContent(JSON.stringify({ state: body.state || null, updatedAt: Date.now() }));
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'ok' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
